@@ -1,10 +1,9 @@
 define(function(require, exports, module) {
 
-  var call_id_prefix = "worker";
   var last_call_id = 0;
 
   function executeEnsime(emitter, req, callback) {
-    var reqId = call_id_prefix + (last_call_id++);
+    var reqId = last_call_id++;
     emitter.on("call.result", function hdlr(event) {
       if (event.id !== reqId) return;
       emitter.off("call.result", hdlr);

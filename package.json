@@ -16,6 +16,9 @@
   "plugins": {
     "ensime": {
       "packagePath": "plugins/c9.ide.language.scala/ensime"
+    },
+    "ensime-connector": {
+      "packagePath": "plugins/c9.ide.language.scala/ensime-connector"
     }
   },
   "engines": {

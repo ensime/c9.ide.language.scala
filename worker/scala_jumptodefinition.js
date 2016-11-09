@@ -3,7 +3,7 @@ define(function(require, exports, module) {
   var baseHandler = require("plugins/c9.ide.language/base_handler");
   var workerUtil = require("plugins/c9.ide.language/worker_util");
   var util = require("./util");
-  var path = require("path");
+  var path = require("/static/lib/path");
 
   var handler = module.exports = Object.create(baseHandler);
   var emitter;

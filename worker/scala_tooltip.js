@@ -6,6 +6,7 @@ define(function(require, exports, module) {
   var formatting = require("./formatting");
 
   var pluginDir = "/home/ubuntu/.c9/plugins/c9.ide.language.scala";
+  var node = "/home/ubuntu/.nvm/versions/node/v4.1.1/bin/node";
 
   var handler = module.exports = Object.create(baseHandler);
   var emitter;
@@ -20,7 +21,8 @@ define(function(require, exports, module) {
     console.log("Scala tooltip initialized.");
 
     emitter.on("set_config", function(config) {
-      pluginDir = config.plugin || pluginDir;
+      pluginDir = config.pluginDir || pluginDir;
+      node = config.node || node;
     });
     if (!handler.workspaceDir) {
       handler.workspaceDir = "/home/ubuntu/workspace";
@@ -35,7 +37,7 @@ define(function(require, exports, module) {
 
   function loadDocumentation(declPos, callback) {
     //TODO handle unsaved workspace files
-    workerUtil.execFile("node", {
+    workerUtil.execFile(node, {
       cwd: handler.workspaceDir,
       args: [
         pluginDir + "/server/doc-fetcher.js",

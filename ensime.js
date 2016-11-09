@@ -3,7 +3,7 @@ define(function(require, exports, module) {
         "Plugin", "language", "ui", "commands", "menus", "preferences",
         "settings", "notification.bubble", "installer", "save",
         "Editor", "editors", "tabManager", "Datagrid", "format",
-        "language.complete", "fs", "c9", "run"
+        "language.complete", "fs", "c9", "run", "ensime-connector"
     ];
     main.provides = ["ensime"];
     return main;
@@ -26,6 +26,7 @@ define(function(require, exports, module) {
         var fs = imports.fs;
         var c9 = imports.c9;
         var run = imports.run;
+        var ensimeConnector = imports["ensime-connector"];
 
         var jsdiff = require("./lib/diff.js");
         var path = require("path");
@@ -34,9 +35,6 @@ define(function(require, exports, module) {
 
         var ensimeRunning = false;
         var ensimeReady = false;
-        var ensimeConnector;
-        var call_id_prefix = "plugin";
-        var last_call_id = 0;
 
         // make sure all deps are installed
         installer.createSession("c9.ide.language.scala", require("./install"));
@@ -64,7 +62,7 @@ define(function(require, exports, module) {
                     return !ensimeRunning;
                 },
                 exec: function() {
-                    startEnsime(false);
+                    startEnsime(true);
                 }
             }, plugin);
             commands.addCommand({
@@ -247,6 +245,7 @@ define(function(require, exports, module) {
             settings.on("read", function(e) {
                 settings.setDefaults("project/ensime", [
                     ["ensimeFile", "/home/ubuntu/workspace/.ensime"],
+                    ["pluginDir", "/home/ubuntu/.c9/plugins/c9.ide.language.scala"],
                     ["sbt", "/usr/bin/sbt"],
                     ["noExecAnalysis", true],
                     ["node", "/home/ubuntu/.nvm/versions/node/v4.2.4/bin/node"]
@@ -264,15 +263,20 @@ define(function(require, exports, module) {
                             setting: "project/ensime/@ensimeFile",
                             position: 100
                         },
+                        "Plugin Directory": {
+                            type: "textbox",
+                            setting: "project/ensime/@pluginDir",
+                            position: 101
+                        },
                         "SBT Executable": {
                             type: "textbox",
                             setting: "project/ensime/@sbt",
-                            position: 101
+                            position: 102
                         },
                         "Node Executable": {
                             type: "textbox",
                             setting: "project/ensime/@node",
-                            position: 102
+                            position: 103
                         },
                         "Don't use execAnalysis": {
                             type: "checkbox",
@@ -289,25 +293,7 @@ define(function(require, exports, module) {
 
         plugin.on("load", function() {
             loadSettings();
-            language.registerLanguageHandler("plugins/c9.ide.language.scala/worker/ensime_connector", function(err, handler) {
-                if (err) return console.error(err);
-                console.log("ensime-connector initialized.");
-                ensimeConnector = handler;
 
-                function sendSettings(handler) {
-                    handler.emit("set_ensime_config", {
-                        ensimeFile: settings.get("project/ensime/@ensimeFile"),
-                        sbt: settings.get("project/ensime/@sbt"),
-                        node: settings.get("project/ensime/@node"),
-                        noExecAnalysis: settings.get("project/ensime/@noExecAnalysis")
-                    });
-                }
-                settings.on("project/ensime", sendSettings.bind(null, handler), plugin);
-                sendSettings(handler);
-
-                registerEnsimeHandlers(handler);
-                emit("connector.ready", handler);
-            });
             language.registerLanguageHandler("plugins/c9.ide.language.scala/worker/scala_completer", function(err, handler) {
                 if (err) return console.error(err);
                 setupConnectorBridge(handler);
@@ -334,6 +320,16 @@ define(function(require, exports, module) {
             });
             language.registerLanguageHandler("plugins/c9.ide.language.scala/worker/scala_tooltip", function(err, handler) {
                 if (err) return console.error(err);
+
+                function sendSettings(handler) {
+                    handler.emit("set_config", {
+                        node: settings.get("project/ensime/@node"),
+                        pluginDir: settings.get("project/ensime/@pluginDir")
+                    });
+                }
+                settings.on("project/ensime", sendSettings.bind(null, handler), plugin);
+                sendSettings(handler);
+
                 setupConnectorBridge(handler);
             });
             language.registerLanguageHandler("plugins/c9.ide.language.scala/worker/scala_jumptodefinition", function(err, handler) {
@@ -375,13 +371,16 @@ define(function(require, exports, module) {
                 });
             });
 
+            connectToEnsime();
+
             save.on("afterSave", function(event) {
                 emit("afterSave", event.path);
             });
+
+            startEnsime(true);
         });
 
         plugin.on("unload", function() {
-            ensimeConnector = null;
             ensimeRunning = false;
             ensimeReady = false;
             language.unregisterLanguageHandler("plugins/c9.ide.language.scala/worker/scala_refactor");
@@ -391,22 +390,15 @@ define(function(require, exports, module) {
             language.unregisterLanguageHandler("plugins/c9.ide.language.scala/worker/scala_completer");
             language.unregisterLanguageHandler("plugins/c9.ide.language.scala/worker/scala_outline");
             language.unregisterLanguageHandler("plugins/c9.ide.language.scala/worker/scala_markers");
-            language.unregisterLanguageHandler("plugins/c9.ide.language.scala/worker/ensime_connector");
-        });
-        plugin.on("connector.ready", function() {
-            startEnsime(true);
         });
 
-        function registerEnsimeHandlers(handler) {
-            handler.on("log", function(data) {
-                console.log("ENSIME: " + data);
-            });
-            handler.on("starting", function() {
+        function connectToEnsime() {
+            ensimeConnector.on("starting", function() {
                 ensimeRunning = true;
                 ensimeReady = false;
                 bubble.popup("ENSIME is starting...");
             });
-            handler.on("started", function() {
+            ensimeConnector.on("started", function() {
                 ensimeRunning = true;
                 ensimeReady = true;
                 bubble.popup("ENSIME started.");
@@ -414,25 +406,22 @@ define(function(require, exports, module) {
                     if (err) return bubble.popup("Typecheck not successful");
                 });
             });
-            handler.on("stopped", function(code) {
+            ensimeConnector.on("stopped", function(code) {
                 ensimeRunning = false;
                 ensimeReady = false;
                 bubble.popup("ENSIME stopped.");
             });
-            handler.on("updated", function() {
-                bubble.popup("ENSIME was updated.");
-            });
-            handler.on("updateFailed", function(error) {
-                bubble.popup("ENSIME could not be updated: " + error);
-            });
         }
 
         function setupConnectorBridge(handler) {
-            handler.on("call", function(event) {
-                ensimeConnector.emit("call", event);
-            });
-            ensimeConnector.on("call.result", function(event) {
-                handler.emit("call.result", event);
+            handler.on("call", function(req) {
+                ensimeConnector.call(req.request, function(err, resp){
+                    handler.emit("call.result", {
+                        id: req.id,
+                        err: err,
+                        result: resp
+                    });
+                });
             });
             ensimeConnector.on("event", function(event) {
                 handler.emit("event", event);
@@ -545,34 +534,28 @@ define(function(require, exports, module) {
 
         /** Ensime-server handling */
         function startEnsime(attach) {
-            if (!ensimeConnector) return console.error("ensime-connector not started.");
             if (ensimeRunning) return;
-            ensimeConnector.emit("start", attach);
+            ensimeConnector.start(true);
         }
 
         function stopEnsime() {
-            if (!ensimeConnector) return console.error("ensime-connector not started.");
             if (!ensimeRunning) return;
-            ensimeConnector.emit("stop");
+            ensimeConnector.stop();
         }
 
         function updateEnsime() {
-            if (!ensimeConnector) return console.error("ensime-connector not started.");
-            ensimeConnector.emit("update");
+            ensimeConnector.update(function(err) {
+                if (err) {
+                    bubble.popup("ENSIME could not be updated: " + err);
+                }
+                else {
+                    bubble.popup("ENSIME was updated.");
+                }
+            });
         }
 
         function executeEnsime(req, callback) {
-            if (!ensimeConnector) return callback("ensime-connector not started.");
-            var reqId = call_id_prefix + (last_call_id++);
-            ensimeConnector.on("call.result", function hdlr(event) {
-                if (event.id !== reqId) return;
-                plugin.off("call.result", hdlr);
-                callback(event.error, event.result);
-            });
-            ensimeConnector.emit("call", {
-                id: reqId,
-                request: req,
-            });
+            ensimeConnector.call(req, callback);
         }
 
         /** Ensime commands. */
@@ -605,10 +588,6 @@ define(function(require, exports, module) {
             });
         }
 
-        /**
-         * This is an example of an implementation of a plugin.
-         * @singleton
-         */
         plugin.freezePublicAPI({});
 
         register(null, {
